@@ -15,7 +15,8 @@ embedding_file_path = os.path.join(BASE_DIR, "site_embeddings.json")
 
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=["https://nelsojo.github.io"])
+
 
 def normalize_url(url):
     # Normalize URL by stripping trailing slash, lowercasing host
