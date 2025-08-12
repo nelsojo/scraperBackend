@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify, send_file
-from flask_cors import cross_origin
 from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
@@ -67,7 +66,7 @@ def scrape_html_from_url(url, visited):
     except requests.RequestException:
         return []
 
-    soup = BeautifulSoup(response.text, 'html.parser')
+    soup = BeautifulSoup(response.text, 'lxml')
 
     def get_clean_text(el):
         return ' '.join(el.stripped_strings)
@@ -142,7 +141,6 @@ decoded_api_key = base64.b64decode(encoded_api_key).decode('utf-8')
 client = openai.OpenAI(api_key=decoded_api_key)
 
 @app.route('/upload', methods=['POST'])
-@cross_origin()
 def upload_json():
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
