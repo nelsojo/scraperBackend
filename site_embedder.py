@@ -116,14 +116,11 @@ def scrape_html_from_url(url, visited, base_netloc=None):
     if base_netloc is None:
         base_netloc = urlparse(url).netloc.lower()
 
-    base_path_prefix = "/JonNelson"
-
     for a_tag in soup.find_all('a', href=True):
         full_url = urljoin(url, a_tag['href'])
         parsed_full = urlparse(full_url)
-        # Only crawl internal links on the same domain and under /JonNelson/
-        if (parsed_full.netloc.lower() == base_netloc
-            and parsed_full.path.startswith(base_path_prefix)):
+        # Only crawl internal links (same domain)
+        if parsed_full.netloc.lower() == base_netloc:
             norm_full_url = normalize_url(full_url)
             if norm_full_url not in visited:
                 site_data.extend(scrape_html_from_url(full_url, visited, base_netloc=base_netloc))
