@@ -66,7 +66,7 @@ def scrape_html_from_url(url, visited):
     except requests.RequestException:
         return []
 
-    soup = BeautifulSoup(response.text, 'lxml')
+    soup = BeautifulSoup(response.text, 'html.parser')
 
     def get_clean_text(el):
         return ' '.join(el.stripped_strings)
