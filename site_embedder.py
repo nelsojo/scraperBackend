@@ -108,20 +108,20 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix="/"):
 
     if not base_path_prefix:
         base_path_prefix = "/"
-    # Ensure base_path_prefix ends with slash for startswith check safety
-    if not base_path_prefix.endswith("/"):
-        base_path_prefix += "/"
 
+    # Crawl all internal links (same domain), ignoring path prefix
     for a_tag in soup.find_all('a', href=True):
         full_url = urljoin(url, a_tag['href'])
         parsed_full = urlparse(full_url)
-        # Only crawl internal links that start with base_path_prefix
-        link_path = parsed_full.path
-        if (parsed_full.netloc.lower() == base_netloc and
-            (link_path == base_path_prefix.rstrip("/") or link_path.startswith(base_path_prefix))):
+        if parsed_full.netloc.lower() == base_netloc:
             norm_full_url = normalize_url(full_url)
             if norm_full_url not in visited:
-                site_data.extend(scrape_html_from_url(full_url, visited, base_netloc=base_netloc, base_path_prefix=base_path_prefix))
+                site_data.extend(scrape_html_from_url(
+                    full_url,
+                    visited,
+                    base_netloc=base_netloc,
+                    base_path_prefix=base_path_prefix
+                ))
 
     return site_data
 
