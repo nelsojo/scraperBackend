@@ -115,8 +115,12 @@ def scrape_html_from_url(url, visited):
     return site_data
 
 @app.route('/site_embeddings.json')
+@app.route('/site_embeddings.json')
 def serve_embeddings():
-    return send_file('site_embeddings.json', mimetype='application/json')
+    filename = 'site_embeddings.json'
+    if not os.path.exists(filename):
+        return jsonify([])  # return empty array if no embeddings yet
+    return send_file(filename, mimetype='application/json')
 
 
 @app.route('/scrape', methods=['POST'])
