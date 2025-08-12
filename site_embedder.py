@@ -115,7 +115,6 @@ def scrape_html_from_url(url, visited):
     return site_data
 
 @app.route('/site_embeddings.json')
-@app.route('/site_embeddings.json')
 def serve_embeddings():
     filename = 'site_embeddings.json'
     if not os.path.exists(filename):
