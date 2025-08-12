@@ -15,11 +15,11 @@ app = Flask(__name__)
 CORS(app, origins=["https://nelsojo.github.io"])
 
 def normalize_url(url):
-    # Normalize URL by stripping trailing slash, lowercasing host
     parsed = urlparse(url)
     path = parsed.path.rstrip('/')
     netloc = parsed.netloc.lower()
-    normalized = urlunparse(parsed._replace(path=path, netloc=netloc))
+    # Remove query and fragment for normalization
+    normalized = urlunparse(parsed._replace(path=path, netloc=netloc, query="", fragment=""))
     return normalized
 
 def clean_and_dedupe(texts, min_length=50):
@@ -53,7 +53,7 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix="/"):
 
     visited.add(norm_url)
     site_data = []
-    print(f"Scraping: {url}")
+    print(f"Scraping: {url} (Visited count: {len(visited)})")
 
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -109,11 +109,12 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix="/"):
     if not base_path_prefix:
         base_path_prefix = "/"
 
-    # Crawl all internal links (same domain), ignoring path prefix
+    # Crawl all internal links (same domain)
     for a_tag in soup.find_all('a', href=True):
         full_url = urljoin(url, a_tag['href'])
         parsed_full = urlparse(full_url)
         if parsed_full.netloc.lower() == base_netloc:
+            # Optional: filter by base_path_prefix if desired
             norm_full_url = normalize_url(full_url)
             if norm_full_url not in visited:
                 site_data.extend(scrape_html_from_url(
