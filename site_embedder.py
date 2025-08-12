@@ -189,15 +189,23 @@ def upload_json():
     except Exception as e:
         return jsonify({"error": f"Invalid JSON file: {str(e)}"}), 400
 
-    # Filter pages to only those matching base_netloc and base_path_prefix
+    # If site_data is a dict with "pages" key, extract it
+    if isinstance(site_data, dict) and "pages" in site_data:
+        pages = site_data["pages"]
+    elif isinstance(site_data, list):
+        pages = site_data
+    else:
+        return jsonify({"error": "JSON file must be a list or contain a 'pages' key."}), 400
+
     filtered_site_data = []
-    for page in site_data:
+    for page in pages:
         url = page.get("url", "")
         parsed_url = urlparse(url)
         if parsed_url.netloc.lower() == base_netloc:
             path = parsed_url.path
             if (path == base_path_prefix or path.startswith(base_path_prefix.rstrip("/") + "/")):
                 filtered_site_data.append(page)
+
 
     if not filtered_site_data:
         return jsonify({"error": "No pages matched the specified domain and path prefix"}), 400
