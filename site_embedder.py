@@ -10,6 +10,9 @@ from tqdm import tqdm
 import base64
 import os
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+embedding_file_path = os.path.join(BASE_DIR, "site_embeddings.json")
+
 
 app = Flask(__name__)
 CORS(app)
@@ -116,10 +119,9 @@ def scrape_html_from_url(url, visited):
 
 @app.route('/site_embeddings.json')
 def serve_embeddings():
-    filename = 'site_embeddings.json'
-    if not os.path.exists(filename):
-        return jsonify([])  # return empty array if no embeddings yet
-    return send_file(filename, mimetype='application/json')
+    if not os.path.exists(embedding_file_path):
+        return jsonify([])  # Return empty array if file not found
+    return send_file(embedding_file_path, mimetype='application/json')
 
 
 @app.route('/scrape', methods=['POST'])
@@ -200,8 +202,10 @@ def upload_json():
             return jsonify({"error": f"Embedding failed at text #{i}: {str(e)}"}), 500
 
     # Optionally save to file here or just return as response
-    with open("site_embeddings.json", "w", encoding="utf-8") as f:
-         json.dump(site_embeddings, f, ensure_ascii=False, indent=2)
+    with open(embedding_file_path, "w", encoding="utf-8") as f:
+        json.dump(site_embeddings, f, ensure_ascii=False, indent=2)
+    print(f"Saved embeddings file at {embedding_file_path}")
+    print(f"File exists: {os.path.exists(embedding_file_path)}")
 
     return jsonify(site_embeddings)
 
