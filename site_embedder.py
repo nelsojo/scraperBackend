@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 import datetime
 import json
 import openai
@@ -16,6 +16,14 @@ embedding_file_path = os.path.join(BASE_DIR, "site_embeddings.json")
 
 app = Flask(__name__)
 CORS(app)
+
+def normalize_url(url):
+    # Normalize URL by stripping trailing slash, lowercasing host
+    parsed = urlparse(url)
+    path = parsed.path.rstrip('/')
+    netloc = parsed.netloc.lower()
+    normalized = urlunparse(parsed._replace(path=path, netloc=netloc))
+    return normalized
 
 def clean_and_dedupe(texts, min_length=50):
     seen = set()
@@ -47,21 +55,20 @@ def is_internal_link(base_url, link):
     parsed_link = urlparse(link)
     return (parsed_link.netloc == "" or parsed_link.netloc == parsed_base.netloc)
 
-def scrape_html_from_url(url, visited):
-    if url in visited:
+def scrape_html_from_url(url, visited, base_netloc=None):
+    norm_url = normalize_url(url)
+    if norm_url in visited:
         return []
 
-    visited.add(url)
+    visited.add(norm_url)
     site_data = []
+    print(f"Scraping: {url}")
 
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
+        headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers, timeout=10)
         if 'text/html' not in response.headers.get('Content-Type', ''):
             return []
-
         response.raise_for_status()
     except requests.RequestException:
         return []
@@ -105,15 +112,18 @@ def scrape_html_from_url(url, visited):
 
     site_data.append(page)
 
-    base_url = url
+    # Determine base netloc once
+    if base_netloc is None:
+        base_netloc = urlparse(url).netloc.lower()
+
     for a_tag in soup.find_all('a', href=True):
-        full_url = urljoin(base_url, a_tag['href'])
-        if (
-            is_internal_link(base_url, full_url)
-            and is_valid_http_url(full_url)
-            and full_url not in visited
-        ):
-            site_data.extend(scrape_html_from_url(full_url, visited))
+        full_url = urljoin(url, a_tag['href'])
+        parsed_full = urlparse(full_url)
+        # Only crawl internal links (same domain)
+        if parsed_full.netloc.lower() == base_netloc:
+            norm_full_url = normalize_url(full_url)
+            if norm_full_url not in visited:
+                site_data.extend(scrape_html_from_url(full_url, visited, base_netloc=base_netloc))
 
     return site_data
 
