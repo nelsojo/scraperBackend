@@ -145,8 +145,19 @@ def scrape_route():
         base_path_prefix = "/"
 
     visited = set()
-    results = scrape_html_from_url(url, visited, base_netloc=base_netloc, base_path_prefix=base_path_prefix)
-    return jsonify(results)
+    results = scrape_html_from_url(
+        url,
+        visited,
+        base_netloc=base_netloc,
+        base_path_prefix=base_path_prefix
+    )
+
+    return jsonify({
+        "base_netloc": base_netloc,
+        "base_path_prefix": base_path_prefix,
+        "pages": results
+    })
+
 
 # Decode your API key once at startup
 encoded_api_key = "c2stcHJvai1WSVhfUnJ5bEw4ZW5ZbFTNnFndzBmNjYyNVl1YVZIS3FIbHhwR05uM2tfc24taTlfMGhtWVRicUhkZnpZT3N6dUo4N2NsV09BMVQzQmxia0ZKd2s5ajBqQ0VUUDMtR19kdjlRRnNDZ052THZHR1RrN2EyYUlPY19DM2hTSjVDai1kWXRzeDlzRkVLdVBoWXQzSThWd3JTRzdVSUE="
