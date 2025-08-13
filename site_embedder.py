@@ -46,7 +46,7 @@ def is_valid_http_url(url):
     parsed = urlparse(url)
     return parsed.scheme in ('http', 'https')
 
-def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix="/"):
+def scrape_html_from_url(url, visited, base_netloc=None):
     norm_url = normalize_url(url)
     if norm_url in visited:
         return []
@@ -106,33 +106,19 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix="/"):
     if base_netloc is None:
         base_netloc = urlparse(url).netloc.lower()
 
-    if not base_path_prefix:
-        base_path_prefix = "/"
-
-    # Crawl all internal links (same domain)
+    # Crawl all internal links on the same domain (no path restrictions)
     for a_tag in soup.find_all('a', href=True):
         full_url = urljoin(url, a_tag['href'])
         parsed_full = urlparse(full_url)
 
         if parsed_full.netloc.lower() == base_netloc:
-            # Enforce the path prefix restriction here:
-            path = parsed_full.path
-            prefix = base_path_prefix.rstrip('/')
-
-            if prefix == "":
-                prefix = "/"
-
-            # Only crawl if path == prefix or path starts with prefix + "/"
-            if path == prefix or path.startswith(prefix + "/"):
-                norm_full_url = normalize_url(full_url)
-                if norm_full_url not in visited:
-                    site_data.extend(scrape_html_from_url(
-                        full_url,
-                        visited,
-                        base_netloc=base_netloc,
-                        base_path_prefix=base_path_prefix
-                    ))
-
+            norm_full_url = normalize_url(full_url)
+            if norm_full_url not in visited:
+                site_data.extend(scrape_html_from_url(
+                    full_url,
+                    visited,
+                    base_netloc=base_netloc
+                ))
 
     return site_data
 
@@ -151,23 +137,19 @@ def scrape_route():
 
     parsed = urlparse(url)
     base_netloc = parsed.netloc.lower()
-    base_path_prefix = parsed.path.rstrip('/')
-    if not base_path_prefix:
-        base_path_prefix = "/"
 
     visited = set()
     results = scrape_html_from_url(
         url,
         visited,
-        base_netloc=base_netloc,
-        base_path_prefix=base_path_prefix
+        base_netloc=base_netloc
     )
 
     return jsonify({
         "base_netloc": base_netloc,
-        "base_path_prefix": base_path_prefix,
         "pages": results
     })
+
 
 # Decode your API key once at startup
 encoded_api_key = "c2stcHJvai1WSVhfUnJ5bEw4ZW5ZbHFTNnFndzBmNjYyNVl1YVZIS3FIbHhwR05uM2tfc24taTlfMGhtWVRicUhkZnpZT3N6dUo4N2NsV09BMVQzQmxia0ZKd2s5ajBqQ0VUUDMtR19kdjlRRnNDZ052THZHR1RrN2EyYUlPY19DM2hTSjVDai1kWXRzeDlzRkVLdVBoWXQzSThWd3JTRzdVSUE="
