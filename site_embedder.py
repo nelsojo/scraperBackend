@@ -15,11 +15,11 @@ app = Flask(__name__)
 CORS(app, origins=["https://nelsojo.github.io"])
 
 def normalize_url(url):
+    # Normalize URL by stripping trailing slash, lowercasing host
     parsed = urlparse(url)
     path = parsed.path.rstrip('/')
     netloc = parsed.netloc.lower()
-    # Remove query and fragment for normalization
-    normalized = urlunparse(parsed._replace(path=path, netloc=netloc, query="", fragment=""))
+    normalized = urlunparse(parsed._replace(path=path, netloc=netloc))
     return normalized
 
 def clean_and_dedupe(texts, min_length=50):
@@ -46,14 +46,14 @@ def is_valid_http_url(url):
     parsed = urlparse(url)
     return parsed.scheme in ('http', 'https')
 
-def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
+def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix="/"):
     norm_url = normalize_url(url)
     if norm_url in visited:
         return []
 
     visited.add(norm_url)
     site_data = []
-    print(f"Scraping: {url} (Visited count: {len(visited)})")
+    print(f"Scraping: {url}")
 
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -61,8 +61,7 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
         if 'text/html' not in response.headers.get('Content-Type', ''):
             return []
         response.raise_for_status()
-    except requests.RequestException as e:
-        print(f"Request failed for {url}: {e}")
+    except requests.RequestException:
         return []
 
     soup = BeautifulSoup(response.text, 'lxml')
@@ -107,35 +106,24 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
     if base_netloc is None:
         base_netloc = urlparse(url).netloc.lower()
 
-    # Normalize and lowercase base_path_prefix
-    if base_path_prefix:
-        base_path_prefix = base_path_prefix.rstrip('/').lower()
-    else:
-        base_path_prefix = ""
+    if not base_path_prefix:
+        base_path_prefix = "/"
+    # Ensure base_path_prefix ends with slash for startswith check safety
+    if not base_path_prefix.endswith("/"):
+        base_path_prefix += "/"
 
-    # Crawl all internal links on the same domain within base_path_prefix
     for a_tag in soup.find_all('a', href=True):
         full_url = urljoin(url, a_tag['href'])
         parsed_full = urlparse(full_url)
-        link_netloc = parsed_full.netloc.lower()
-        link_path = parsed_full.path.lower()
-
-        if link_netloc == base_netloc:
-            # Only crawl if path starts with base_path_prefix
-            if base_path_prefix and not (link_path == base_path_prefix or link_path.startswith(base_path_prefix + '/')):
-                continue
-
+        # Only crawl internal links that start with base_path_prefix
+        link_path = parsed_full.path
+        if (parsed_full.netloc.lower() == base_netloc and
+            (link_path == base_path_prefix.rstrip("/") or link_path.startswith(base_path_prefix))):
             norm_full_url = normalize_url(full_url)
             if norm_full_url not in visited:
-                site_data.extend(scrape_html_from_url(
-                    full_url,
-                    visited,
-                    base_netloc=base_netloc,
-                    base_path_prefix=base_path_prefix
-                ))
+                site_data.extend(scrape_html_from_url(full_url, visited, base_netloc=base_netloc, base_path_prefix=base_path_prefix))
 
     return site_data
-
 
 @app.route('/site_embeddings.json')
 def serve_embeddings():
@@ -153,6 +141,8 @@ def scrape_route():
     parsed = urlparse(url)
     base_netloc = parsed.netloc.lower()
     base_path_prefix = parsed.path.rstrip('/')
+    if not base_path_prefix:
+        base_path_prefix = "/"
 
     visited = set()
     results = scrape_html_from_url(
@@ -162,25 +152,11 @@ def scrape_route():
         base_path_prefix=base_path_prefix
     )
 
-    # Filter pages with path starting with base_path_prefix
-    prefix_lower = base_path_prefix.lower()
-    filtered_pages = [
-        page for page in results
-        if page.get("url") and urlparse(page["url"]).path.lower().rstrip('/').startswith(prefix_lower)
-    ]
-
-    print(f"All scraped URLs before filtering:")
-    for p in results:
-        print(f" - {p.get('url')}")
-    print(f"Filtered pages count: {len(filtered_pages)}")
-
     return jsonify({
         "base_netloc": base_netloc,
-        "pages": filtered_pages
+        "base_path_prefix": base_path_prefix,
+        "pages": results
     })
-
-
-
 
 # Decode your API key once at startup
 encoded_api_key = "c2stcHJvai1WSVhfUnJ5bEw4ZW5ZbHFTNnFndzBmNjYyNVl1YVZIS3FIbHhwR05uM2tfc24taTlfMGhtWVRicUhkZnpZT3N6dUo4N2NsV09BMVQzQmxia0ZKd2s5ajBqQ0VUUDMtR19kdjlRRnNDZ052THZHR1RrN2EyYUlPY19DM2hTSjVDai1kWXRzeDlzRkVLdVBoWXQzSThWd3JTRzdVSUE="
@@ -213,23 +189,15 @@ def upload_json():
     except Exception as e:
         return jsonify({"error": f"Invalid JSON file: {str(e)}"}), 400
 
-    # If site_data is a dict with "pages" key, extract it
-    if isinstance(site_data, dict) and "pages" in site_data:
-        pages = site_data["pages"]
-    elif isinstance(site_data, list):
-        pages = site_data
-    else:
-        return jsonify({"error": "JSON file must be a list or contain a 'pages' key."}), 400
-
+    # Filter pages to only those matching base_netloc and base_path_prefix
     filtered_site_data = []
-    for page in pages:
+    for page in site_data:
         url = page.get("url", "")
         parsed_url = urlparse(url)
         if parsed_url.netloc.lower() == base_netloc:
             path = parsed_url.path
             if (path == base_path_prefix or path.startswith(base_path_prefix.rstrip("/") + "/")):
                 filtered_site_data.append(page)
-
 
     if not filtered_site_data:
         return jsonify({"error": "No pages matched the specified domain and path prefix"}), 400
