@@ -57,13 +57,24 @@ def is_internal_link(base_url, link):
     parsed_link = urlparse(link)
     return (parsed_link.netloc == "" or parsed_link.netloc == parsed_base.netloc)
 
+
 def rewrite_links_in_html(soup, base_url):
     """Rewrite all relative href/src attributes to absolute URLs."""
+    parsed_base = urlparse(base_url)
+    base_prefix = "/JonNelson"  # your site base path prefix
+
     for tag in soup.find_all(["a", "link", "script", "img"]):
         attr = "href" if tag.name in ["a", "link"] else "src"
         if tag.has_attr(attr):
-            tag[attr] = urljoin(base_url, tag[attr])
+            orig_url = tag[attr]
+            # If it starts with '/' but not '/JonNelson', prepend '/JonNelson'
+            if orig_url.startswith('/') and not orig_url.startswith(base_prefix):
+                fixed_url = base_prefix + orig_url
+            else:
+                fixed_url = orig_url
+            tag[attr] = urljoin(base_url, fixed_url)
     return soup
+
 
 def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
     norm_url = normalize_url(url)
