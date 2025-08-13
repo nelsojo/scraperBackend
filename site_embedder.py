@@ -69,9 +69,14 @@ def scrape_html_from_url(url, visited, base_netloc=None):
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers, timeout=10)
         if 'text/html' not in response.headers.get('Content-Type', ''):
+            print(f"Skipping non-HTML content at {url}")
             return []
         response.raise_for_status()
-    except requests.RequestException:
+    except requests.HTTPError as http_err:
+        print(f"HTTP error for {url}: {http_err} (Status code: {http_err.response.status_code if http_err.response else 'N/A'})")
+        return []
+    except requests.RequestException as req_err:
+        print(f"Request failed for {url}: {req_err}")
         return []
 
     soup = BeautifulSoup(response.text, 'lxml')
@@ -113,20 +118,19 @@ def scrape_html_from_url(url, visited, base_netloc=None):
 
     site_data.append(page)
 
-    # Determine base netloc once
     if base_netloc is None:
         base_netloc = urlparse(url).netloc.lower()
 
     for a_tag in soup.find_all('a', href=True):
         full_url = urljoin(url, a_tag['href'])
         parsed_full = urlparse(full_url)
-        # Only crawl internal links (same domain)
         if parsed_full.netloc.lower() == base_netloc:
             norm_full_url = normalize_url(full_url)
             if norm_full_url not in visited:
                 site_data.extend(scrape_html_from_url(full_url, visited, base_netloc=base_netloc))
 
     return site_data
+
 
 @app.route('/site_embeddings.json')
 def serve_embeddings():
