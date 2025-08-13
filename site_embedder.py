@@ -72,7 +72,7 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
 
     visited.add(norm_url)
     site_data = []
-    print(f"Scraping: {url}")
+    print(f"Scraping v1: {url}")
 
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
