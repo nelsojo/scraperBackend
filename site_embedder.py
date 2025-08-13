@@ -116,7 +116,15 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
     soup = BeautifulSoup(response.text, 'lxml')
 
     # 🔹 Rewrite all relative links to absolute before scraping content
-    soup = rewrite_links_in_html(soup, url)
+    parsed_url = urlparse(url)
+    path = parsed_url.path
+
+    # Ensure path ends with a slash (directory)
+    if not path.endswith('/'):
+        path += '/'
+
+    url_with_slash = urlunparse(parsed_url._replace(path=path))
+    soup = rewrite_links_in_html(soup, url_with_slash)
 
     def get_clean_text(el):
         return ' '.join(el.stripped_strings)
