@@ -61,7 +61,8 @@ def scrape_html_from_url(url, visited, base_netloc=None):
         if 'text/html' not in response.headers.get('Content-Type', ''):
             return []
         response.raise_for_status()
-    except requests.RequestException:
+    except requests.RequestException as e:
+        print(f"Request failed for {url}: {e}")
         return []
 
     soup = BeautifulSoup(response.text, 'lxml')
@@ -110,10 +111,14 @@ def scrape_html_from_url(url, visited, base_netloc=None):
     for a_tag in soup.find_all('a', href=True):
         full_url = urljoin(url, a_tag['href'])
         parsed_full = urlparse(full_url)
+        link_netloc = parsed_full.netloc.lower()
 
-        if parsed_full.netloc.lower() == base_netloc:
+        print(f"Found link: {full_url} (netloc: {link_netloc})")  # Debug print
+
+        if link_netloc == base_netloc:
             norm_full_url = normalize_url(full_url)
             if norm_full_url not in visited:
+                print(f" -> Crawling link: {full_url}")  # Debug print
                 site_data.extend(scrape_html_from_url(
                     full_url,
                     visited,
@@ -143,15 +148,26 @@ def scrape_route():
         url,
         visited,
         base_netloc=base_netloc
-        # no base_path_prefix here so crawl full domain
     )
 
-    # Filter pages after crawl - keep only those with path starting with "/JonNelson"
     path_prefix = "/JonNelson"
+    prefix_lower = path_prefix.lower().rstrip('/')
+    print("All scraped URLs before filtering:")
+    for page in results:
+        print(f" - {page.get('url')}")
+
+    def path_matches(url_path, prefix):
+        # Normalize and lowercase path for comparison
+        path = url_path.lower().rstrip('/')
+        # Allow exact match or prefix match (e.g. /jonnelson or /jonnelson/...)
+        return path == prefix or path.startswith(prefix + '/')
+
     filtered_pages = [
         page for page in results
-        if urlparse(page.get("url", "")).path.startswith(path_prefix)
+        if path_matches(urlparse(page.get("url", "")).path, prefix_lower)
     ]
+
+    print(f"Filtered pages count: {len(filtered_pages)}")
 
     return jsonify({
         "base_netloc": base_netloc,
