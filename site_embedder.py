@@ -150,10 +150,16 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
         else:
             # Relative URL, join with current page URL
             full_url = urljoin(url, href)
+            parsed_full_url = urlparse(full_url)
+            if parsed_full_url.netloc.lower() != base_netloc:
+                continue
+            if not parsed_full_url.path.startswith(base_path_prefix):
+                continue
 
         norm_full_url = normalize_url(full_url)
         if norm_full_url not in visited:
             site_data.extend(scrape_html_from_url(full_url, visited, base_netloc, base_path_prefix))
+
 
     return site_data
 
