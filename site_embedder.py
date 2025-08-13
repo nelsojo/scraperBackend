@@ -72,7 +72,7 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
 
     visited.add(norm_url)
     site_data = []
-    print(f"Scraping v2: {url}")
+    print(f"Scraping v3: {url}")
 
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -137,6 +137,9 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
         base_path_prefix = urlparse(url).path.rstrip('/')
         if base_path_prefix == "":
             base_path_prefix = "/"
+        elif not base_path_prefix.endswith('/'):
+            base_path_prefix += '/'
+
 
     for a_tag in soup.find_all('a', href=True):
         href = a_tag['href'].strip()
