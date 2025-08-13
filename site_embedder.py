@@ -18,6 +18,7 @@ app = Flask(__name__)
 CORS(app, origins=["https://nelsojo.github.io"])
 
 
+
 def normalize_url(url):
     # Normalize URL by stripping trailing slash, lowercasing host
     parsed = urlparse(url)
@@ -56,6 +57,14 @@ def is_internal_link(base_url, link):
     parsed_link = urlparse(link)
     return (parsed_link.netloc == "" or parsed_link.netloc == parsed_base.netloc)
 
+def rewrite_links_in_html(soup, base_url):
+    """Rewrite all relative href/src attributes to absolute URLs."""
+    for tag in soup.find_all(["a", "link", "script", "img"]):
+        attr = "href" if tag.name in ["a", "link"] else "src"
+        if tag.has_attr(attr):
+            tag[attr] = urljoin(base_url, tag[attr])
+    return soup
+
 def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
     norm_url = normalize_url(url)
     if norm_url in visited:
@@ -81,6 +90,9 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
 
     soup = BeautifulSoup(response.text, 'lxml')
 
+    # 🔹 Rewrite all relative links to absolute before scraping content
+    soup = rewrite_links_in_html(soup, url)
+
     def get_clean_text(el):
         return ' '.join(el.stripped_strings)
 
@@ -93,7 +105,7 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
         "links": [
             {
                 "text": a.get_text(strip=True),
-                "href": urljoin(url, a["href"])
+                "href": a["href"]  # Already absolute now
             }
             for a in soup.find_all("a", href=True)
             if a["href"].strip() and a.get_text(strip=True)
@@ -132,36 +144,21 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
             continue
 
         parsed_href = urlparse(href)
-
         if parsed_href.scheme in ('http', 'https'):
-            # Absolute URL - must match base domain and base path prefix
             if parsed_href.netloc.lower() != base_netloc:
                 continue
             if not parsed_href.path.startswith(base_path_prefix):
                 continue
             full_url = href
-
-        elif href.startswith('/'):
-            # Absolute path - must start with base_path_prefix
-            if not href.startswith(base_path_prefix):
-                continue
-            full_url = urljoin(f"{urlparse(url).scheme}://{base_netloc}", href)
-
         else:
-            # Relative URL, join with current page URL
-            full_url = urljoin(url, href)
-            parsed_full_url = urlparse(full_url)
-            if parsed_full_url.netloc.lower() != base_netloc:
-                continue
-            if not parsed_full_url.path.startswith(base_path_prefix):
-                continue
+            continue  # All links should already be absolute now
 
         norm_full_url = normalize_url(full_url)
         if norm_full_url not in visited:
             site_data.extend(scrape_html_from_url(full_url, visited, base_netloc, base_path_prefix))
 
-
     return site_data
+
 
 
 
