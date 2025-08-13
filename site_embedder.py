@@ -144,23 +144,19 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
             continue
 
         parsed_href = urlparse(href)
-        # All links are now absolute, so we only check domain
         if parsed_href.netloc.lower() != base_netloc:
             continue
 
-        full_url = href  # already absolute from rewrite_links_in_html()
+        if not parsed_href.path.startswith(base_path_prefix):
+            continue
+
+        full_url = href
 
         norm_full_url = normalize_url(full_url)
         if norm_full_url not in visited:
-            site_data.extend(scrape_html_from_url(full_url, visited, base_netloc))
-
-
-
+            site_data.extend(scrape_html_from_url(full_url, visited, base_netloc, base_path_prefix))
 
     return site_data
-
-
-
 
 @app.route('/site_embeddings.json')
 def serve_embeddings():

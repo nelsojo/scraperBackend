@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Website Scraper</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    textarea { width: 100%; height: 300px; }
+  </style>
+</head>
+<body>
+  <h1>🔍 Web Page Scraper</h1>
+  <input type="text" id="url" placeholder="Enter website URL" style="width: 300px;" />
+  <button onclick="scrapeSite()">Scrape and Download JSON</button>
+
+  <script>
+    const backendURL = "https://scraperbackend-y1os.onrender.com";
+
+    function extractBaseDomainAndPath(urlString) {
+      try {
+        const url = new URL(urlString);
+        const baseNetloc = url.host.toLowerCase();
+        let basePathPrefix = url.pathname;
+        if (!basePathPrefix.endsWith('/')) basePathPrefix += '/';
+        return { baseNetloc, basePathPrefix };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    async function scrapeSite() {
+      const url = document.getElementById("url").value.trim();
+      if (!url) return alert("Please enter a URL.");
+
+      const baseInfo = extractBaseDomainAndPath(url);
+      if (!baseInfo) {
+        alert("Invalid URL format.");
+        return;
+      }
+
+      const res = await fetch(`${backendURL}/scrape`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url })
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        alert("Error: " + (error.error || "Unknown error"));
+        return;
+      }
+
+      const data = await res.json();
+
+      // Save the baseNetloc and basePathPrefix in localStorage for later use during upload
+      localStorage.setItem('baseNetloc', baseInfo.baseNetloc);
+      localStorage.setItem('basePathPrefix', baseInfo.basePathPrefix);
+
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "scraped_content.json";
+      link.click();
+    }
+  </script>
+
+  <h2>📂 Upload Scraped JSON to Generate Embeddings</h2>
+  <input type="file" id="fileInput" accept=".json" />
+  <button onclick="uploadAndEmbed()">Upload & Embed</button>
+
+  <textarea id="embeddingOutput" readonly placeholder="Embeddings preview will show here..." style="height: 300px;"></textarea>
+
+  <script>
+    async function uploadAndEmbed() {
+      const input = document.getElementById("fileInput");
+      if (input.files.length === 0) {
+        alert("Please select a JSON file.");
+        return;
+      }
+      const file = input.files[0];
+      const baseNetloc = localStorage.getItem('baseNetloc');
+      const basePathPrefix = localStorage.getItem('basePathPrefix');
+
+      if (!baseNetloc || !basePathPrefix) {
+        alert("Please scrape a site first to set base domain and path prefix.");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("base_netloc", baseNetloc);
+      formData.append("base_path_prefix", basePathPrefix);
+
+      const res = await fetch(`${backendURL}/upload`, {
+        method: "POST",
+        body: formData
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        alert("Error: " + (error.error || "Unknown error"));
+        return;
+      }
+
+      const data = await res.json();
+
+      // Show only a preview of the first few embeddings
+      const preview = data.slice(0, 3).map(e => JSON.stringify(e, null, 2)).join('\n\n');
+      document.getElementById("embeddingOutput").value = preview;
+    }
+  </script>
+
+  <!-- 🤖 Chatbot Interface -->
+  <h2>🤖 Chat with Your Site</h2>
+  <div id="chat-box" style="border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; margin-bottom: 10px;"></div>
+  <input type="text" id="user-input" placeholder="Ask a question..." style="width: 80%;" />
+  <button id="send-button">Send</button>
+
+  <script type="module">
+    // --------- Decode API Key ---------
+    function decodeBase64(encodedString) {
+      return atob(encodedString);
+    }
+    
+    const encodedApiKey = "c2stcHJvai1WSVhfUnJ5bEw4ZW5ZbHFTNnFndzBmNjYyNVl1YVZIS3FIbHhwR05uM2tfc24taTlfMGhtWVRicUhkZnpZT3N6dUo4N2NsV09BMVQzQmxia0ZKd2s5ajBqQ0VUUDMtR19kdjlRRnNDZ052THZHR1RrN2EyYUlPY19DM2hTSjVDai1kWXRzeDlzRkVLdVBoWXQzSThWd3JTRzdVSUE=";
+    const API_KEY = decodeBase64(encodedApiKey);
+
+    // --------- Cosine Similarity ---------
+    function cosineSimilarity(vecA, vecB) {
+      let dot = 0, normA = 0, normB = 0;
+      for (let i = 0; i < vecA.length; i++) {
+        dot += vecA[i] * vecB[i];
+        normA += vecA[i] ** 2;
+        normB += vecB[i] ** 2;
+      }
+      return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    // --------- Load Embeddings ---------
+    let siteEmbeddings = [];
+
+    async function loadSiteEmbeddings() {
+      try {
+        const file = await fetch(`${backendURL}/site_embeddings.json`);
+        siteEmbeddings = await file.json();
+        console.log("Embeddings loaded.");
+      } catch (err) {
+        console.error("Failed to load embeddings:", err);
+      }
+    }
+
+    window.addEventListener("load", loadSiteEmbeddings);
+
+    // --------- Fetch Embedding for Input ---------
+    async function getEmbedding(text) {
+      const res = await fetch("https://api.openai.com/v1/embeddings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${API_KEY}`
+        },
+        body: JSON.stringify({
+          input: text,
+          model: "text-embedding-ada-002"
+        })
+      });
+      const data = await res.json();
+      return data.data[0].embedding;
+    }
+
+    // --------- Search Embeddings ---------
+    async function searchKnowledgeBase(queryEmbedding, topK = 20, threshold = 0.15) {
+  if (!siteEmbeddings.length) return [];
+
+  // Dynamically detect the main site prefix from the embeddings
+  let mainSitePrefix = "";
+  if (siteEmbeddings.length) {
+    try {
+      const urls = siteEmbeddings.map(e => new URL(e.metadata.url).origin + new URL(e.metadata.url).pathname.split("/").slice(0, 2).join("/"));
+      const counts = {};
+      urls.forEach(u => counts[u] = (counts[u] || 0) + 1);
+      mainSitePrefix = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+    } catch (e) {
+      console.warn("Could not auto-detect main site prefix:", e);
+    }
+  }
+
+  const scored = siteEmbeddings.map(item => {
+    let score = cosineSimilarity(queryEmbedding, item.embedding);
+    const url = item.metadata.url || "";
+
+    try {
+      const parsed = new URL(url);
+      const path = parsed.pathname;
+      const segments = path.split("/").filter(Boolean);
+      const depth = segments.length;
+      const filename = segments[segments.length - 1] || "";
+
+      if (mainSitePrefix && url.startsWith(mainSitePrefix)) {
+        if (filename.match(/index\.html|about|projects|experience/i)) {
+          score += Math.max(0.5 - depth * 0.04, 0);
+        }
+        if (depth <= 2) {
+          score += 0.2;
+        }
+      } else {
+        score -= 0.3;
+      }
+
+      score -= depth * 0.05;
+    } catch (e) {
+      console.warn("Invalid URL in embedding metadata:", url);
+    }
+
+    return { ...item, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.filter(item => item.score > threshold).slice(0, topK);
+}
+
+
+    // --------- Chat Message Handler ---------
+    async function sendMessage() {
+      const userInput = document.getElementById("user-input").value;
+      if (!userInput.trim()) return;
+
+      const chatBox = document.getElementById("chat-box");
+      chatBox.innerHTML += `<div class="message user"><strong>You:</strong> ${userInput}</div>`;
+
+      try {
+        const userEmbedding = await getEmbedding(userInput);
+        const topMatches = await searchKnowledgeBase(userEmbedding);
+
+        const context = topMatches
+          .map(m => `[${m.metadata.title}](${m.metadata.url}): ${m.text}`)
+          .join("\n\n");
+
+        const prompt = `Use the following website content to answer the question:\n\n${context}\n\nQuestion: ${userInput}`;
+
+        const res = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${API_KEY}`
+          },
+          body: JSON.stringify({
+            model: "gpt-4o",
+            messages: [{ role: "user", content: prompt }]
+          })
+        });
+
+        const data = await res.json();
+        const botReply = data.choices[0].message.content;
+        const sources = [...new Set(topMatches.map(m => m.metadata.url))]; // Deduplicate
+        const sourceLinks = sources.map(url => `<a href="${url}" target="_blank">${url}</a>`).join(", ");
+
+        chatBox.innerHTML += `
+          <div class="message bot"><strong>Bot:</strong> ${botReply}</div>
+          <div class="message bot sources"><em>Sources:</em> ${sourceLinks}</div>
+        `;
+      } catch (error) {
+        console.error(error);
+        chatBox.innerHTML += `<div class="message bot error">⚠️ Error: ${error.message}</div>`;
+      }
+
+      document.getElementById("user-input").value = "";
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    document.getElementById("send-button").addEventListener("click", sendMessage);
+  </script>
+
+</body>
+</html>
