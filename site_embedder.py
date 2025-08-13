@@ -56,7 +56,7 @@ def is_internal_link(base_url, link):
     parsed_link = urlparse(link)
     return (parsed_link.netloc == "" or parsed_link.netloc == parsed_base.netloc)
 
-def scrape_html_from_url(url, visited, base_netloc=None):
+def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
     norm_url = normalize_url(url)
     if norm_url in visited:
         return []
@@ -121,15 +121,42 @@ def scrape_html_from_url(url, visited, base_netloc=None):
     if base_netloc is None:
         base_netloc = urlparse(url).netloc.lower()
 
+    if base_path_prefix is None:
+        base_path_prefix = urlparse(url).path.rstrip('/')
+        if base_path_prefix == "":
+            base_path_prefix = "/"
+
     for a_tag in soup.find_all('a', href=True):
-        full_url = urljoin(url, a_tag['href'])
-        parsed_full = urlparse(full_url)
-        if parsed_full.netloc.lower() == base_netloc:
-            norm_full_url = normalize_url(full_url)
-            if norm_full_url not in visited:
-                site_data.extend(scrape_html_from_url(full_url, visited, base_netloc=base_netloc))
+        href = a_tag['href'].strip()
+        if not href:
+            continue
+
+        parsed_href = urlparse(href)
+
+        if parsed_href.scheme in ('http', 'https'):
+            # Absolute URL - must match base domain and base path prefix
+            if parsed_href.netloc.lower() != base_netloc:
+                continue
+            if not parsed_href.path.startswith(base_path_prefix):
+                continue
+            full_url = href
+
+        elif href.startswith('/'):
+            # Absolute path - must start with base_path_prefix
+            if not href.startswith(base_path_prefix):
+                continue
+            full_url = urljoin(f"{urlparse(url).scheme}://{base_netloc}", href)
+
+        else:
+            # Relative URL, join with current page URL
+            full_url = urljoin(url, href)
+
+        norm_full_url = normalize_url(full_url)
+        if norm_full_url not in visited:
+            site_data.extend(scrape_html_from_url(full_url, visited, base_netloc, base_path_prefix))
 
     return site_data
+
 
 
 @app.route('/site_embeddings.json')
