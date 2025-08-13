@@ -46,7 +46,7 @@ def is_valid_http_url(url):
     parsed = urlparse(url)
     return parsed.scheme in ('http', 'https')
 
-def scrape_html_from_url(url, visited, base_netloc=None):
+def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
     norm_url = normalize_url(url)
     if norm_url in visited:
         return []
@@ -107,25 +107,35 @@ def scrape_html_from_url(url, visited, base_netloc=None):
     if base_netloc is None:
         base_netloc = urlparse(url).netloc.lower()
 
-    # Crawl all internal links on the same domain (no path restrictions)
+    # Normalize and lowercase base_path_prefix
+    if base_path_prefix:
+        base_path_prefix = base_path_prefix.rstrip('/').lower()
+    else:
+        base_path_prefix = ""
+
+    # Crawl all internal links on the same domain within base_path_prefix
     for a_tag in soup.find_all('a', href=True):
         full_url = urljoin(url, a_tag['href'])
         parsed_full = urlparse(full_url)
         link_netloc = parsed_full.netloc.lower()
-
-        print(f"Found link: {full_url} (netloc: {link_netloc})")  # Debug print
+        link_path = parsed_full.path.lower()
 
         if link_netloc == base_netloc:
+            # Only crawl if path starts with base_path_prefix
+            if base_path_prefix and not (link_path == base_path_prefix or link_path.startswith(base_path_prefix + '/')):
+                continue
+
             norm_full_url = normalize_url(full_url)
             if norm_full_url not in visited:
-                print(f" -> Crawling link: {full_url}")  # Debug print
                 site_data.extend(scrape_html_from_url(
                     full_url,
                     visited,
-                    base_netloc=base_netloc
+                    base_netloc=base_netloc,
+                    base_path_prefix=base_path_prefix
                 ))
 
     return site_data
+
 
 @app.route('/site_embeddings.json')
 def serve_embeddings():
@@ -142,37 +152,33 @@ def scrape_route():
 
     parsed = urlparse(url)
     base_netloc = parsed.netloc.lower()
+    base_path_prefix = parsed.path.rstrip('/')
 
     visited = set()
     results = scrape_html_from_url(
         url,
         visited,
-        base_netloc=base_netloc
+        base_netloc=base_netloc,
+        base_path_prefix=base_path_prefix
     )
 
-    path_prefix = "/JonNelson"
-    prefix_lower = path_prefix.lower().rstrip('/')
-    print("All scraped URLs before filtering:")
-    for page in results:
-        print(f" - {page.get('url')}")
-
-    def path_matches(url_path, prefix):
-        # Normalize and lowercase path for comparison
-        path = url_path.lower().rstrip('/')
-        # Allow exact match or prefix match (e.g. /jonnelson or /jonnelson/...)
-        return path == prefix or path.startswith(prefix + '/')
-
+    # Filter pages with path starting with base_path_prefix
+    prefix_lower = base_path_prefix.lower()
     filtered_pages = [
         page for page in results
-        if path_matches(urlparse(page.get("url", "")).path, prefix_lower)
+        if page.get("url") and urlparse(page["url"]).path.lower().rstrip('/').startswith(prefix_lower)
     ]
 
+    print(f"All scraped URLs before filtering:")
+    for p in results:
+        print(f" - {p.get('url')}")
     print(f"Filtered pages count: {len(filtered_pages)}")
 
     return jsonify({
         "base_netloc": base_netloc,
         "pages": filtered_pages
     })
+
 
 
 
