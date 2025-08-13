@@ -3,25 +3,29 @@ from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse, urlunparse
-import os
+import datetime
 import json
-import base64
 import openai
+from tqdm import tqdm
+import base64
+import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 embedding_file_path = os.path.join(BASE_DIR, "site_embeddings.json")
 
+
 app = Flask(__name__)
-# Allow CORS only from your frontend origin
 CORS(app, origins=["https://nelsojo.github.io"])
 
 
-def normalize_url(url):
-    # Normalize URL by lowercasing host, keep path as-is (no trailing slash stripping)
-    parsed = urlparse(url)
-    netloc = parsed.netloc.lower()
-    return urlunparse(parsed._replace(netloc=netloc))
 
+def normalize_url(url):
+    # Normalize URL by stripping trailing slash, lowercasing host
+    parsed = urlparse(url)
+    path = parsed.path.rstrip('/')
+    netloc = parsed.netloc.lower()
+    normalized = urlunparse(parsed._replace(path=path, netloc=netloc))
+    return normalized
 
 def clean_and_dedupe(texts, min_length=50):
     seen = set()
@@ -30,8 +34,11 @@ def clean_and_dedupe(texts, min_length=50):
     for text in texts:
         cleaned = text.strip()
 
+        # Skip very short or empty text
         if len(cleaned) < min_length:
             continue
+
+        # Skip duplicates
         if cleaned in seen:
             continue
 
@@ -45,12 +52,18 @@ def is_valid_http_url(url):
     parsed = urlparse(url)
     return parsed.scheme in ('http', 'https')
 
+def is_internal_link(base_url, link):
+    parsed_base = urlparse(base_url)
+    parsed_link = urlparse(link)
+    return (parsed_link.netloc == "" or parsed_link.netloc == parsed_base.netloc)
+
 
 def rewrite_links_in_html(soup, base_url):
+    """Rewrite all relative href/src attributes to absolute URLs with logging."""
     from urllib.parse import urlparse, urljoin
 
     parsed_base = urlparse(base_url)
-    base_prefix = "/JonNelson"  # Your site base path prefix
+    base_prefix = "/JonNelson"  # your site base path prefix
 
     print(f"Base URL for rewriting links: {base_url}")
     print(f"Using base prefix: {base_prefix}")
@@ -61,6 +74,7 @@ def rewrite_links_in_html(soup, base_url):
             orig_url = tag[attr]
             print(f"Original {attr} found in <{tag.name}>: {orig_url}")
 
+            # If it starts with '/' but not '/JonNelson', prepend '/JonNelson'
             if orig_url.startswith('/') and not orig_url.startswith(base_prefix):
                 fixed_url = base_prefix + orig_url
                 print(f"Fixed {attr}: prepended base prefix -> {fixed_url}")
@@ -73,6 +87,7 @@ def rewrite_links_in_html(soup, base_url):
             print(f"Rewritten {attr} to absolute URL: {absolute_url}")
 
     return soup
+
 
 
 def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
@@ -100,11 +115,12 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
 
     soup = BeautifulSoup(response.text, 'lxml')
 
+    # 🔹 Rewrite all relative links to absolute before scraping content
     parsed_url = urlparse(url)
     path = parsed_url.path
 
-    # Only add trailing slash if path looks like directory (no file extension)
-    if not path.endswith('/') and not os.path.splitext(path)[1]:
+    # Ensure path ends with a slash (directory)
+    if not path.endswith('/'):
         path += '/'
 
     url_with_slash = urlunparse(parsed_url._replace(path=path))
@@ -157,6 +173,7 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
         elif not base_path_prefix.endswith('/'):
             base_path_prefix += '/'
 
+
     for a_tag in soup.find_all('a', href=True):
         href = a_tag['href'].strip()
         if not href:
@@ -169,12 +186,13 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
         if not parsed_href.path.startswith(base_path_prefix):
             continue
 
-        norm_full_url = normalize_url(href)
+        full_url = href
+
+        norm_full_url = normalize_url(full_url)
         if norm_full_url not in visited:
-            site_data.extend(scrape_html_from_url(href, visited, base_netloc, base_path_prefix))
+            site_data.extend(scrape_html_from_url(full_url, visited, base_netloc, base_path_prefix))
 
     return site_data
-
 
 @app.route('/site_embeddings.json')
 def serve_embeddings():
@@ -194,12 +212,10 @@ def scrape_route():
     results = scrape_html_from_url(url, visited)
     return jsonify(results)
 
-
 # Decode your API key once at startup
 encoded_api_key = "c2stcHJvai1WSVhfUnJ5bEw4ZW5ZbHFTNnFndzBmNjYyNVl1YVZIS3FIbHhwR05uM2tfc24taTlfMGhtWVRicUhkZnpZT3N6dUo4N2NsV09BMVQzQmxia0ZKd2s5ajBqQ0VUUDMtR19kdjlRRnNDZ052THZHR1RrN2EyYUlPY19DM2hTSjVDai1kWXRzeDlzRkVLdVBoWXQzSThWd3JTRzdVSUE="
 decoded_api_key = base64.b64decode(encoded_api_key).decode('utf-8')
 client = openai.OpenAI(api_key=decoded_api_key)
-
 
 @app.route('/upload', methods=['POST'])
 def upload_json():
