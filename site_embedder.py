@@ -143,12 +143,21 @@ def scrape_route():
         url,
         visited,
         base_netloc=base_netloc
+        # no base_path_prefix here so crawl full domain
     )
+
+    # Filter pages after crawl - keep only those with path starting with "/JonNelson"
+    path_prefix = "/JonNelson"
+    filtered_pages = [
+        page for page in results
+        if urlparse(page.get("url", "")).path.startswith(path_prefix)
+    ]
 
     return jsonify({
         "base_netloc": base_netloc,
-        "pages": results
+        "pages": filtered_pages
     })
+
 
 
 # Decode your API key once at startup
