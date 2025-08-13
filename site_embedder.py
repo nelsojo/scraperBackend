@@ -72,7 +72,7 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
 
     visited.add(norm_url)
     site_data = []
-    print(f"Scraping v1: {url}")
+    print(f"Scraping v2: {url}")
 
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -144,18 +144,18 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
             continue
 
         parsed_href = urlparse(href)
-        if parsed_href.scheme in ('http', 'https'):
-            if parsed_href.netloc.lower() != base_netloc:
-                continue
-            if not parsed_href.path.startswith(base_path_prefix):
-                continue
-            full_url = href
-        else:
-            continue  # All links should already be absolute now
+        # All links are now absolute, so we only check domain
+        if parsed_href.netloc.lower() != base_netloc:
+            continue
+
+        full_url = href  # already absolute from rewrite_links_in_html()
 
         norm_full_url = normalize_url(full_url)
         if norm_full_url not in visited:
-            site_data.extend(scrape_html_from_url(full_url, visited, base_netloc, base_path_prefix))
+            site_data.extend(scrape_html_from_url(full_url, visited, base_netloc))
+
+
+
 
     return site_data
 
