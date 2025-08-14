@@ -15,8 +15,7 @@ embedding_file_path = os.path.join(BASE_DIR, "site_embeddings.json")
 
 
 app = Flask(__name__)
-CORS(app)
-#CORS(app, origins=["https://nelsojo.github.io"])
+CORS(app, origins=["https://nelsojo.github.io"])
 
 
 
@@ -254,58 +253,6 @@ encoded_api_key = "c2stcHJvai1WSVhfUnJ5bEw4ZW5ZbHFTNnFndzBmNjYyNVl1YVZIS3FIbHhwR
 decoded_api_key = base64.b64decode(encoded_api_key).decode('utf-8')
 client = openai.OpenAI(api_key=decoded_api_key)
 
-import threading
-
-def generate_embeddings_in_background(site_data, embedding_file_path):
-    texts_to_embed = []
-    metadata = []
-
-    # Prepare texts and metadata
-    for page in site_data:
-        combined_texts = []
-        combined_texts.extend(page.get("paragraphs", []))
-        for lst in page.get("lists", []):
-            combined_texts.extend([item for item in lst if len(item.strip()) >= 30])
-        for table in page.get("tables", []):
-            for row in table.get("rows", []):
-                combined_texts.extend([cell for cell in row if len(cell.strip()) >= 30])
-        combined_texts.extend(page.get("headings", []))
-
-        filtered_texts = clean_and_dedupe(combined_texts)
-
-        for text in filtered_texts:
-            texts_to_embed.append(text)
-            metadata.append({
-                "url": page.get("url", ""),
-                "title": page.get("title", "")
-            })
-
-    # Stream embeddings to file
-    with open(embedding_file_path, "w", encoding="utf-8") as f:
-        f.write("[\n")
-        first = True
-        for i, text in enumerate(texts_to_embed):
-            try:
-                response = client.embeddings.create(
-                    input=text,
-                    model="text-embedding-ada-002"
-                )
-                embedding = response.data[0].embedding
-                item = {"metadata": metadata[i], "text": text, "embedding": embedding}
-
-                if not first:
-                    f.write(",\n")
-                else:
-                    first = False
-
-                json.dump(item, f, ensure_ascii=False)
-            except Exception as e:
-                print(f"Embedding failed at text #{i}: {e}")
-                continue
-        f.write("\n]")
-    print(f"Background embedding generation finished: {embedding_file_path}")
-
-
 @app.route('/upload', methods=['POST'])
 def upload_json():
     if 'file' not in request.files:
@@ -320,12 +267,58 @@ def upload_json():
     except Exception as e:
         return jsonify({"error": f"Invalid JSON file: {str(e)}"}), 400
 
-    # Start background thread
-    thread = threading.Thread(target=generate_embeddings_in_background, args=(site_data, embedding_file_path))
-    thread.start()
+    texts_to_embed = []
+    metadata = []
 
-    return jsonify({"status": "started", "message": "Embedding generation running in background"})
+    for page in site_data:
+        combined_texts = []
 
+        combined_texts.extend(page.get("paragraphs", []))
+
+        for lst in page.get("lists", []):
+            combined_texts.extend([item for item in lst if len(item.strip()) >= 30])
+
+        for table in page.get("tables", []):
+            for row in table.get("rows", []):
+                combined_texts.extend([cell for cell in row if len(cell.strip()) >= 30])
+
+        combined_texts.extend(page.get("headings", []))
+
+        filtered_texts = clean_and_dedupe(combined_texts)
+
+        for text in filtered_texts:
+            texts_to_embed.append(text)
+            metadata.append({
+                "url": page.get("url", ""),
+                "title": page.get("title", "")
+            })
+
+    site_embeddings = []
+
+    for i, text in enumerate(texts_to_embed):
+        try:
+            response = client.embeddings.create(
+                input=text,
+                model="text-embedding-ada-002"
+            )
+            embedding = response.data[0].embedding
+            site_embeddings.append({
+                "metadata": metadata[i],
+                "text": text,
+                "embedding": embedding
+            })
+        except Exception as e:
+            print(f"Embedding failed at text #{i}: {e}")
+            # Skip this text, continue embedding the rest
+            continue
+
+    with open(embedding_file_path, "w", encoding="utf-8") as f:
+        json.dump(site_embeddings, f, ensure_ascii=False, indent=2)
+
+    print(f"Saved embeddings file at {embedding_file_path}")
+    print(f"File exists: {os.path.exists(embedding_file_path)}")
+
+    return jsonify(site_embeddings)
 
 
 if __name__ == "__main__":
