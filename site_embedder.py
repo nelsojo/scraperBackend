@@ -207,18 +207,23 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
         if not href:
             continue
 
-        parsed_href = urlparse(href)
+        # Resolve relative URLs to absolute URLs before any checks
+        full_url = urljoin(url, href)
+        parsed_href = urlparse(full_url)
+
+        # Only follow internal links
         if parsed_href.netloc.lower() != base_netloc:
             continue
 
+        # Only follow links within base path prefix
         if not parsed_href.path.startswith(base_path_prefix):
             continue
 
+        # Only follow directories or HTML pages
         if not parsed_href.path.endswith(('.html', '/')):
             continue  # skip non-HTML resources
 
-        full_url = href
-
+        # Normalize and check if visited
         norm_full_url = normalize_url(full_url)
         if norm_full_url not in visited:
             site_data.extend(scrape_html_from_url(full_url, visited, base_netloc, base_path_prefix))
