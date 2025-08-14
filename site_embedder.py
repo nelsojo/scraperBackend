@@ -259,80 +259,76 @@ encoded_api_key = "c2stcHJvai1WSVhfUnJ5bEw4ZW5ZbHFTNnFndzBmNjYyNVl1YVZIS3FIbHhwR
 decoded_api_key = base64.b64decode(encoded_api_key).decode('utf-8')
 client = openai.OpenAI(api_key=decoded_api_key)
 
-from flask import Response
-
 @app.route('/upload', methods=['POST'])
 def upload_json():
-    def generate():
-        if 'file' not in request.files:
-            yield 'data: {"error": "No file part"}\n\n'
-            return
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
 
-        file = request.files['file']
-        if file.filename == '':
-            yield 'data: {"error": "No selected file"}\n\n'
-            return
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
 
-        try:
-            site_data = json.load(file)
-        except Exception as e:
-            yield f'data: {{"error": "Invalid JSON file: {str(e)}"}}\n\n'
-            return
+    # Incremental processing using ijson or simple page-by-page load
+    try:
+        site_data = json.load(file)
+    except Exception as e:
+        return jsonify({"error": f"Invalid JSON file: {str(e)}"}), 400
 
-        preview = []
-        count = 0
-        first_item = True
+    preview = []
+    count = 0
+    first_item = True
 
-        with open(embedding_file_path, "w", encoding="utf-8") as f:
-            f.write("[\n")
-            for page_idx, page in enumerate(site_data, start=1):
-                texts_to_embed = []
-                texts_to_embed.extend(page.get("paragraphs", []))
-                for lst in page.get("lists", []):
-                    texts_to_embed.extend([item for item in lst if len(item.strip()) >= 30])
-                for table in page.get("tables", []):
-                    for row in table.get("rows", []):
-                        texts_to_embed.extend([cell for cell in row if len(cell.strip()) >= 30])
-                texts_to_embed.extend(page.get("headings", []))
+    with open(embedding_file_path, "w", encoding="utf-8") as f:
+        f.write("[\n")  # start JSON array
 
-                texts_to_embed = clean_and_dedupe(texts_to_embed)
+        for page in site_data:
+            texts_to_embed = []
 
-                for text_idx, text in enumerate(texts_to_embed, start=1):
-                    try:
-                        response = client.embeddings.create(
-                            input=text,
-                            model="text-embedding-ada-002"
-                        )
-                        embedding = response.data[0].embedding
-                        item = {
-                            "metadata": {"url": page.get("url", ""), "title": page.get("title", "")},
+            # Combine texts
+            texts_to_embed.extend(page.get("paragraphs", []))
+            for lst in page.get("lists", []):
+                texts_to_embed.extend([item for item in lst if len(item.strip()) >= 30])
+            for table in page.get("tables", []):
+                for row in table.get("rows", []):
+                    texts_to_embed.extend([cell for cell in row if len(cell.strip()) >= 30])
+            texts_to_embed.extend(page.get("headings", []))
+
+            # Deduplicate and clean
+            texts_to_embed = clean_and_dedupe(texts_to_embed)
+
+            # Generate embeddings one at a time
+            for text in texts_to_embed:
+                try:
+                    response = client.embeddings.create(
+                        input=text,
+                        model="text-embedding-ada-002"
+                    )
+                    embedding = response.data[0].embedding
+                    item = {"metadata": {"url": page.get("url", ""), "title": page.get("title", "")},
                             "text": text,
-                            "embedding": embedding
-                        }
+                            "embedding": embedding}
 
-                        if len(preview) < 3:
-                            preview.append(item)
+                    # Save first 3 items for preview
+                    if len(preview) < 3:
+                        preview.append(item)
 
-                        if not first_item:
-                            f.write(",\n")
-                        else:
-                            first_item = False
-                        json.dump(item, f, ensure_ascii=False)
-                        count += 1
+                    # Stream to file immediately
+                    if not first_item:
+                        f.write(",\n")
+                    else:
+                        first_item = False
 
-                        # Send progress to client
-                        yield f'data: {{"status": "processing", "processed": {count}}}\n\n'
+                    json.dump(item, f, ensure_ascii=False)
+                    count += 1
 
-                    except Exception as e:
-                        print(f"Embedding failed at page {page.get('url', '')} text #{text_idx}: {e}")
-                        continue
+                except Exception as e:
+                    print(f"Embedding failed at page {page.get('url', '')}: {e}")
+                    continue
 
-            f.write("\n]")
+        f.write("\n]")  # close JSON array
 
-        # Final message with preview
-        yield f'data: {{"status": "completed", "count": {count}, "preview": {json.dumps(preview)}}}\n\n'
-
-    return Response(generate(), mimetype='text/event-stream')
+    print(f"Saved embeddings file at {embedding_file_path} ({count} embeddings)")
+    return jsonify({"status": "completed", "count": count, "preview": preview})
 
 
 
