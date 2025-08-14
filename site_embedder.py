@@ -20,11 +20,26 @@ CORS(app, origins=["https://nelsojo.github.io"])
 
 
 def normalize_url(url):
-    # Normalize URL by stripping trailing slash, lowercasing host
+    """
+    Normalize a URL for consistent comparison.
+    - Strips trailing slashes
+    - Lowercases the scheme and host
+    - Removes fragments and query strings
+    - Resolves '/index.html' to '/'
+    """
     parsed = urlparse(url)
-    path = parsed.path.rstrip('/')
+
+    # Lowercase scheme and netloc
+    scheme = parsed.scheme.lower()
     netloc = parsed.netloc.lower()
-    normalized = urlunparse(parsed._replace(path=path, netloc=netloc))
+
+    # Remove fragment and query
+    path = parsed.path
+    if path.endswith('/index.html'):
+        path = path[:-10]  # remove '/index.html'
+    path = path.rstrip('/') or '/'
+
+    normalized = urlunparse((scheme, netloc, path, '', '', ''))
     return normalized
 
 def clean_and_dedupe(texts, min_length=50):
@@ -58,40 +73,42 @@ def is_internal_link(base_url, link):
     return (parsed_link.netloc == "" or parsed_link.netloc == parsed_base.netloc)
 
 
-from urllib.parse import urlparse, urljoin
-
 def rewrite_links_in_html(soup, base_url):
     """Rewrite all relative href/src attributes to absolute URLs with logging."""
     parsed_base = urlparse(base_url)
 
-    # 🔹 Detect the base path prefix dynamically
-    # Example: https://username.github.io/repo/about.html → base_prefix = /repo
-    # Example: https://example.com/blog/about → base_prefix = /blog
-    path_parts = parsed_base.path.strip("/").split("/")
+    # Detect repo prefix for GitHub Pages (username.github.io/repo)
     base_prefix = ""
-    if len(path_parts) >= 1 and path_parts[0]:  # if there is a first path segment
-        base_prefix = "/" + path_parts[0]
+    if parsed_base.netloc.endswith("github.io"):
+        path_parts = parsed_base.path.strip("/").split("/")
+        if len(path_parts) >= 1 and path_parts[0]:
+            base_prefix = "/" + path_parts[0]  # first segment = repo name
+
+    # Site root (with prefix if needed)
+    site_root = f"{parsed_base.scheme}://{parsed_base.netloc}{base_prefix}"
 
     print(f"Base URL for rewriting links: {base_url}")
     print(f"Detected base prefix: {base_prefix if base_prefix else '(none)'}")
+    print(f"Site root for root-relative URLs: {site_root}")
 
     for tag in soup.find_all(["a", "link", "script", "img"]):
         attr = "href" if tag.name in ["a", "link"] else "src"
         if tag.has_attr(attr):
             orig_url = tag[attr]
-            print(f"Original {attr} found in <{tag.name}>: {orig_url}")
+            print(f"Original {attr} in <{tag.name}>: {orig_url}")
 
             fixed_url = orig_url
-            # Only prepend base prefix when needed
-            if base_prefix and orig_url.startswith("/") and not orig_url.startswith(base_prefix):
-                fixed_url = base_prefix + orig_url
-                print(f"Fixed {attr}: prepended base prefix -> {fixed_url}")
-            else:
-                print(f"No fix needed for {attr}")
 
-            absolute_url = urljoin(base_url, fixed_url)
-            tag[attr] = absolute_url
-            print(f"Rewritten {attr} to absolute URL: {absolute_url}")
+            # Case 1: Root-relative path (/...)
+            if orig_url.startswith("/"):
+                fixed_url = urljoin(site_root + "/", orig_url.lstrip("/"))
+
+            # Case 2: Relative to current page directory
+            else:
+                fixed_url = urljoin(base_url, orig_url)
+
+            tag[attr] = fixed_url
+            print(f"Rewritten {attr} to absolute URL: {fixed_url}")
 
     return soup
 
@@ -126,6 +143,9 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
     # 🔹 Rewrite all relative links to absolute before scraping content
     parsed_url = urlparse(url)
     path = parsed_url.path
+
+    
+
 
     # Ensure path ends with a slash (directory)
     if not path.endswith('/'):
@@ -193,6 +213,9 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
 
         if not parsed_href.path.startswith(base_path_prefix):
             continue
+
+        if not parsed_href.path.endswith(('.html', '/')):
+            continue  # skip non-HTML resources
 
         full_url = href
 
