@@ -289,7 +289,9 @@ def upload_json():
                 "title": page.get("title", "")
             })
 
-    # Stream embeddings directly to file
+    preview = []  # store only first few items for preview
+
+    # Stream embeddings to file
     with open(embedding_file_path, "w", encoding="utf-8") as f:
         f.write("[\n")
         first = True
@@ -302,7 +304,10 @@ def upload_json():
                 embedding = response.data[0].embedding
                 item = {"metadata": metadata[i], "text": text, "embedding": embedding}
 
-                # Add comma for JSON array formatting
+                # Save first 3 items for preview
+                if len(preview) < 3:
+                    preview.append(item)
+
                 if not first:
                     f.write(",\n")
                 else:
@@ -317,7 +322,8 @@ def upload_json():
     print(f"Saved embeddings file at {embedding_file_path}")
     print(f"File exists: {os.path.exists(embedding_file_path)}")
 
-    return jsonify({"status": "completed", "count": len(texts_to_embed)})
+    return jsonify({"status": "completed", "count": len(texts_to_embed), "preview": preview})
+
 
 
 
