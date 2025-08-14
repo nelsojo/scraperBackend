@@ -58,15 +58,22 @@ def is_internal_link(base_url, link):
     return (parsed_link.netloc == "" or parsed_link.netloc == parsed_base.netloc)
 
 
+from urllib.parse import urlparse, urljoin
+
 def rewrite_links_in_html(soup, base_url):
     """Rewrite all relative href/src attributes to absolute URLs with logging."""
-    from urllib.parse import urlparse, urljoin
-
     parsed_base = urlparse(base_url)
-    base_prefix = "/JonNelson"  # your site base path prefix
+
+    # 🔹 Detect the base path prefix dynamically
+    # Example: https://username.github.io/repo/about.html → base_prefix = /repo
+    # Example: https://example.com/blog/about → base_prefix = /blog
+    path_parts = parsed_base.path.strip("/").split("/")
+    base_prefix = ""
+    if len(path_parts) >= 1 and path_parts[0]:  # if there is a first path segment
+        base_prefix = "/" + path_parts[0]
 
     print(f"Base URL for rewriting links: {base_url}")
-    print(f"Using base prefix: {base_prefix}")
+    print(f"Detected base prefix: {base_prefix if base_prefix else '(none)'}")
 
     for tag in soup.find_all(["a", "link", "script", "img"]):
         attr = "href" if tag.name in ["a", "link"] else "src"
@@ -74,12 +81,12 @@ def rewrite_links_in_html(soup, base_url):
             orig_url = tag[attr]
             print(f"Original {attr} found in <{tag.name}>: {orig_url}")
 
-            # If it starts with '/' but not '/JonNelson', prepend '/JonNelson'
-            if orig_url.startswith('/') and not orig_url.startswith(base_prefix):
+            fixed_url = orig_url
+            # Only prepend base prefix when needed
+            if base_prefix and orig_url.startswith("/") and not orig_url.startswith(base_prefix):
                 fixed_url = base_prefix + orig_url
                 print(f"Fixed {attr}: prepended base prefix -> {fixed_url}")
             else:
-                fixed_url = orig_url
                 print(f"No fix needed for {attr}")
 
             absolute_url = urljoin(base_url, fixed_url)
@@ -87,6 +94,7 @@ def rewrite_links_in_html(soup, base_url):
             print(f"Rewritten {attr} to absolute URL: {absolute_url}")
 
     return soup
+
 
 
 
