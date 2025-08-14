@@ -272,16 +272,12 @@ def upload_json():
 
     for page in site_data:
         combined_texts = []
-
         combined_texts.extend(page.get("paragraphs", []))
-
         for lst in page.get("lists", []):
             combined_texts.extend([item for item in lst if len(item.strip()) >= 30])
-
         for table in page.get("tables", []):
             for row in table.get("rows", []):
                 combined_texts.extend([cell for cell in row if len(cell.strip()) >= 30])
-
         combined_texts.extend(page.get("headings", []))
 
         filtered_texts = clean_and_dedupe(combined_texts)
@@ -293,32 +289,36 @@ def upload_json():
                 "title": page.get("title", "")
             })
 
-    site_embeddings = []
-
-    for i, text in enumerate(texts_to_embed):
-        try:
-            response = client.embeddings.create(
-                input=text,
-                model="text-embedding-ada-002"
-            )
-            embedding = response.data[0].embedding
-            site_embeddings.append({
-                "metadata": metadata[i],
-                "text": text,
-                "embedding": embedding
-            })
-        except Exception as e:
-            print(f"Embedding failed at text #{i}: {e}")
-            # Skip this text, continue embedding the rest
-            continue
-
+    # Stream embeddings directly to file
     with open(embedding_file_path, "w", encoding="utf-8") as f:
-        json.dump(site_embeddings, f, ensure_ascii=False, indent=2)
+        f.write("[\n")
+        first = True
+        for i, text in enumerate(texts_to_embed):
+            try:
+                response = client.embeddings.create(
+                    input=text,
+                    model="text-embedding-ada-002"
+                )
+                embedding = response.data[0].embedding
+                item = {"metadata": metadata[i], "text": text, "embedding": embedding}
+
+                # Add comma for JSON array formatting
+                if not first:
+                    f.write(",\n")
+                else:
+                    first = False
+
+                json.dump(item, f, ensure_ascii=False)
+            except Exception as e:
+                print(f"Embedding failed at text #{i}: {e}")
+                continue
+        f.write("\n]")
 
     print(f"Saved embeddings file at {embedding_file_path}")
     print(f"File exists: {os.path.exists(embedding_file_path)}")
 
-    return jsonify(site_embeddings)
+    return jsonify({"status": "completed", "count": len(texts_to_embed)})
+
 
 
 if __name__ == "__main__":
