@@ -115,14 +115,31 @@ def rewrite_links_in_html(soup, base_url):
 
 
 
-def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
+def has_repeated_segments(url, max_repeat=3):
+    """Detect if any path segment repeats more than max_repeat times."""
+    path = urlparse(url).path
+    segments = path.strip("/").split("/")
+    counts = {}
+    for seg in segments:
+        counts[seg] = counts.get(seg, 0) + 1
+        if counts[seg] > max_repeat:
+            return True
+    return False
+
+
+def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None, depth=0, max_depth=5):
+    """Scrape HTML from a URL, following internal links safely with recursion limits."""
+    if depth > max_depth:
+        print(f"Max depth reached at {url}")
+        return []
+
     norm_url = normalize_url(url)
     if norm_url in visited:
         return []
 
     visited.add(norm_url)
     site_data = []
-    print(f"Scraping v3: {url}")
+    print(f"Scraping v3: {url} (depth={depth})")
 
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -132,7 +149,7 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
             return []
         response.raise_for_status()
     except requests.HTTPError as http_err:
-        print(f"HTTP error for {url}: {http_err} (Status code: {http_err.response.status_code if http_err.response else 'N/A'})")
+        print(f"HTTP error for {url}: {http_err}")
         return []
     except requests.RequestException as req_err:
         print(f"Request failed for {url}: {req_err}")
@@ -140,17 +157,11 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
 
     soup = BeautifulSoup(response.text, 'lxml')
 
-    # 🔹 Rewrite all relative links to absolute before scraping content
+    # Ensure path ends with slash
     parsed_url = urlparse(url)
     path = parsed_url.path
-
-    
-
-
-    # Ensure path ends with a slash (directory)
     if not path.endswith('/'):
         path += '/'
-
     url_with_slash = urlunparse(parsed_url._replace(path=path))
     soup = rewrite_links_in_html(soup, url_with_slash)
 
@@ -160,17 +171,10 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
     page = {
         "url": url,
         "title": soup.title.string.strip() if soup.title and soup.title.string else "",
-        "headings": [h.get_text(strip=True) for h in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])],
-        "paragraphs": [get_clean_text(el) for el in soup.find_all(['p', 'div', 'span', 'td']) if get_clean_text(el)],
-        "lists": [[li.get_text(strip=True) for li in ul.find_all('li') if li.get_text(strip=True)] for ul in soup.find_all(['ul', 'ol'])],
-        "links": [
-            {
-                "text": a.get_text(strip=True),
-                "href": a["href"]  # Already absolute now
-            }
-            for a in soup.find_all("a", href=True)
-            if a["href"].strip() and a.get_text(strip=True)
-        ],
+        "headings": [h.get_text(strip=True) for h in soup.find_all(['h1','h2','h3','h4','h5','h6'])],
+        "paragraphs": [get_clean_text(el) for el in soup.find_all(['p','div','span','td']) if get_clean_text(el)],
+        "lists": [[li.get_text(strip=True) for li in ul.find_all('li') if li.get_text(strip=True)] for ul in soup.find_all(['ul','ol'])],
+        "links": [{"text": a.get_text(strip=True), "href": a["href"]} for a in soup.find_all("a", href=True) if a["href"].strip() and a.get_text(strip=True)],
         "tables": []
     }
 
@@ -184,51 +188,53 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None):
             if row:
                 rows.append(row)
         if headers or rows:
-            page["tables"].append({
-                "headers": headers,
-                "rows": rows
-            })
+            page["tables"].append({"headers": headers, "rows": rows})
 
     site_data.append(page)
 
     if base_netloc is None:
-        base_netloc = urlparse(url).netloc.lower()
+        base_netloc = parsed_url.netloc.lower()
 
     if base_path_prefix is None:
-        base_path_prefix = urlparse(url).path.rstrip('/')
+        base_path_prefix = parsed_url.path.rstrip('/')
         if base_path_prefix == "":
             base_path_prefix = "/"
         elif not base_path_prefix.endswith('/'):
             base_path_prefix += '/'
-
 
     for a_tag in soup.find_all('a', href=True):
         href = a_tag['href'].strip()
         if not href:
             continue
 
-        # Resolve relative URLs to absolute URLs before any checks
         full_url = urljoin(url, href)
         parsed_href = urlparse(full_url)
 
-        # Only follow internal links
+        # Skip external links
         if parsed_href.netloc.lower() != base_netloc:
             continue
 
-        # Only follow links within base path prefix
+        # Skip links outside base path prefix
         if not parsed_href.path.startswith(base_path_prefix):
             continue
 
-        # Only follow directories or HTML pages
+        # Skip non-HTML resources
         if not parsed_href.path.endswith(('.html', '/')):
-            continue  # skip non-HTML resources
+            continue
 
-        # Normalize and check if visited
+        # Skip URLs with repeated path segments
+        if has_repeated_segments(full_url):
+            print(f"Skipping URL with repeated segments: {full_url}")
+            continue
+
         norm_full_url = normalize_url(full_url)
         if norm_full_url not in visited:
-            site_data.extend(scrape_html_from_url(full_url, visited, base_netloc, base_path_prefix))
+            site_data.extend(
+                scrape_html_from_url(full_url, visited, base_netloc, base_path_prefix, depth=depth+1, max_depth=max_depth)
+            )
 
     return site_data
+
 
 @app.route('/site_embeddings.json')
 def serve_embeddings():
