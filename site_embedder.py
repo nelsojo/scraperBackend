@@ -145,25 +145,32 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None, 
 
     visited.add(norm_url)
     site_data = []
-    print(f"Scraping v3: {url} (depth={depth})")
+    print(f"Scraping: {url} (depth={depth})")
 
+    # First attempt: Requests
+    soup = None
     try:
-        
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page_obj = browser.new_page()
-            page_obj.goto(url, wait_until="networkidle", timeout=20000)  # wait until all network requests finish
-            html = page_obj.content()
-            browser.close()
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        if "text/html" in response.headers.get("Content-Type", ""):
+            soup = BeautifulSoup(response.text, "lxml")
+    except Exception as e:
+        print(f"Requests failed for {url}: {e}")
 
-        # Still parse with BeautifulSoup so the rest of the function works unchanged
-        soup = BeautifulSoup(html, 'lxml')
-
-    except Exception as err:
-        print(f"Failed to load page {url} with Playwright: {err}")
-        return []
-
-    #soup = BeautifulSoup(response.text, 'lxml')
+    # Fallback: Playwright
+    if soup is None or len(soup.get_text(strip=True)) < 300:
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+                page = browser.new_page()
+                page.goto(url, wait_until="networkidle", timeout=20000)
+                html = page.content()
+                browser.close()
+            soup = BeautifulSoup(html, "lxml")
+        except Exception as e:
+            print(f"Playwright failed for {url}: {e}")
+            return []
 
     # Ensure path ends with slash
     parsed_url = urlparse(url)
@@ -176,13 +183,16 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None, 
     def get_clean_text(el):
         return ' '.join(el.stripped_strings)
 
-    page = {
+    # Extract content
+    page_data = {
         "url": url,
         "title": soup.title.string.strip() if soup.title and soup.title.string else "",
         "headings": [h.get_text(strip=True) for h in soup.find_all(['h1','h2','h3','h4','h5','h6'])],
         "paragraphs": [get_clean_text(el) for el in soup.find_all(['p','div','span','td']) if get_clean_text(el)],
-        "lists": [[li.get_text(strip=True) for li in ul.find_all('li') if li.get_text(strip=True)] for ul in soup.find_all(['ul','ol'])],
-        "links": [{"text": a.get_text(strip=True), "href": a["href"]} for a in soup.find_all("a", href=True) if a["href"].strip() and a.get_text(strip=True)],
+        "lists": [[li.get_text(strip=True) for li in ul.find_all('li') if li.get_text(strip=True)]
+                  for ul in soup.find_all(['ul','ol'])],
+        "links": [{"text": a.get_text(strip=True), "href": a["href"]}
+                  for a in soup.find_all("a", href=True) if a["href"].strip() and a.get_text(strip=True)],
         "tables": []
     }
 
@@ -196,13 +206,13 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None, 
             if row:
                 rows.append(row)
         if headers or rows:
-            page["tables"].append({"headers": headers, "rows": rows})
+            page_data["tables"].append({"headers": headers, "rows": rows})
 
-    site_data.append(page)
+    site_data.append(page_data)
 
+    # Set base URL info for internal link filtering
     if base_netloc is None:
         base_netloc = parsed_url.netloc.lower()
-
     if base_path_prefix is None:
         base_path_prefix = parsed_url.path.rstrip('/')
         if base_path_prefix == "":
@@ -210,6 +220,7 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None, 
         elif not base_path_prefix.endswith('/'):
             base_path_prefix += '/'
 
+    # Recursively scrape internal links
     for a_tag in soup.find_all('a', href=True):
         href = a_tag['href'].strip()
         if not href:
@@ -232,7 +243,7 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None, 
 
         # Skip URLs with repeated path segments
         if has_repeated_segments(full_url):
-            print(f"Skipping URL with repeated segments: {full_url}")
+            print(f"Skipping repeated segments: {full_url}")
             continue
 
         norm_full_url = normalize_url(full_url)
@@ -242,6 +253,7 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None, 
             )
 
     return site_data
+
 
 
 @app.route('/site_embeddings.json')
