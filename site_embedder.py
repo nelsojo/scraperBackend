@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import requests
+from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse, urlunparse
 import datetime
@@ -147,20 +148,22 @@ def scrape_html_from_url(url, visited, base_netloc=None, base_path_prefix=None, 
     print(f"Scraping v3: {url} (depth={depth})")
 
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=10)
-        if 'text/html' not in response.headers.get('Content-Type', ''):
-            print(f"Skipping non-HTML content at {url}")
-            return []
-        response.raise_for_status()
-    except requests.HTTPError as http_err:
-        print(f"HTTP error for {url}: {http_err}")
-        return []
-    except requests.RequestException as req_err:
-        print(f"Request failed for {url}: {req_err}")
+        
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page_obj = browser.new_page()
+            page_obj.goto(url, wait_until="networkidle", timeout=20000)  # wait until all network requests finish
+            html = page_obj.content()
+            browser.close()
+
+        # Still parse with BeautifulSoup so the rest of the function works unchanged
+        soup = BeautifulSoup(html, 'lxml')
+
+    except Exception as err:
+        print(f"Failed to load page {url} with Playwright: {err}")
         return []
 
-    soup = BeautifulSoup(response.text, 'lxml')
+    #soup = BeautifulSoup(response.text, 'lxml')
 
     # Ensure path ends with slash
     parsed_url = urlparse(url)
