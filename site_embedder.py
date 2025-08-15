@@ -9,6 +9,10 @@ import openai
 from tqdm import tqdm
 import base64
 import os
+import threading
+import uuid
+
+jobs = {}  # job_id -> {"status": "pending|completed|error", "result": {}}
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 embedding_file_path = os.path.join(BASE_DIR, "site_embeddings.json")
