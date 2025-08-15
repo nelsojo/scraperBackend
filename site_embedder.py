@@ -10,6 +10,11 @@ from tqdm import tqdm
 import base64
 import os
 
+import threading
+import uuid
+
+jobs = {}
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 embedding_file_path = os.path.join(BASE_DIR, "site_embeddings.json")
 
@@ -259,11 +264,66 @@ encoded_api_key = "c2stcHJvai1WSVhfUnJ5bEw4ZW5ZbHFTNnFndzBmNjYyNVl1YVZIS3FIbHhwR
 decoded_api_key = base64.b64decode(encoded_api_key).decode('utf-8')
 client = openai.OpenAI(api_key=decoded_api_key)
 
+def process_upload_in_background(job_id, site_data):
+    preview = []
+    count = 0
+    first_item = True
+
+    try:
+        with open(embedding_file_path, "w", encoding="utf-8") as f:
+            f.write("[\n")
+
+            for page in site_data:
+                texts_to_embed = []
+                texts_to_embed.extend(page.get("paragraphs", []))
+                for lst in page.get("lists", []):
+                    texts_to_embed.extend([item for item in lst if len(item.strip()) >= 30])
+                for table in page.get("tables", []):
+                    for row in table.get("rows", []):
+                        texts_to_embed.extend([cell for cell in row if len(cell.strip()) >= 30])
+                texts_to_embed.extend(page.get("headings", []))
+
+                texts_to_embed = clean_and_dedupe(texts_to_embed)
+
+                for text in texts_to_embed:
+                    try:
+                        response = client.embeddings.create(
+                            input=text,
+                            model="text-embedding-ada-002"
+                        )
+                        embedding = response.data[0].embedding
+                        item = {
+                            "metadata": {"url": page.get("url", ""), "title": page.get("title", "")},
+                            "text": text,
+                            "embedding": embedding
+                        }
+
+                        if len(preview) < 3:
+                            preview.append(item)
+
+                        if not first_item:
+                            f.write(",\n")
+                        else:
+                            first_item = False
+                        json.dump(item, f, ensure_ascii=False)
+
+                        count += 1
+                    except Exception as e:
+                        print(f"Embedding failed: {e}")
+                        continue
+
+            f.write("\n]")
+
+        jobs[job_id]["status"] = "completed"
+        jobs[job_id]["result"] = {"count": count, "preview": preview}
+    except Exception as e:
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["result"] = {"error": str(e)}
+
 @app.route('/upload', methods=['POST'])
 def upload_json():
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
-
     file = request.files['file']
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
@@ -273,69 +333,12 @@ def upload_json():
     except Exception as e:
         return jsonify({"error": f"Invalid JSON file: {str(e)}"}), 400
 
-    preview = []
-    count = 0
-    first_item = True
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {"status": "pending", "result": None}
 
-    # Stream embeddings to file immediately
-    with open(embedding_file_path, "w", encoding="utf-8") as f:
-        f.write("[\n")  # start JSON array
+    threading.Thread(target=process_upload_in_background, args=(job_id, site_data)).start()
 
-        for page_idx, page in enumerate(site_data, start=1):
-            # Combine texts from page
-            texts_to_embed = []
-            texts_to_embed.extend(page.get("paragraphs", []))
-            for lst in page.get("lists", []):
-                texts_to_embed.extend([item for item in lst if len(item.strip()) >= 30])
-            for table in page.get("tables", []):
-                for row in table.get("rows", []):
-                    texts_to_embed.extend([cell for cell in row if len(cell.strip()) >= 30])
-            texts_to_embed.extend(page.get("headings", []))
-
-            # Deduplicate and clean
-            texts_to_embed = clean_and_dedupe(texts_to_embed)
-
-            for text_idx, text in enumerate(texts_to_embed, start=1):
-                try:
-                    response = client.embeddings.create(
-                        input=text,
-                        model="text-embedding-ada-002"
-                    )
-                    embedding = response.data[0].embedding
-                    item = {
-                        "metadata": {"url": page.get("url", ""), "title": page.get("title", "")},
-                        "text": text,
-                        "embedding": embedding
-                    }
-
-                    # Keep first 3 items for frontend preview
-                    if len(preview) < 3:
-                        preview.append(item)
-
-                    # Write immediately to file
-                    if not first_item:
-                        f.write(",\n")
-                    else:
-                        first_item = False
-                    json.dump(item, f, ensure_ascii=False)
-
-                    count += 1
-
-                    # Optional: print progress
-                    if count % 10 == 0:
-                        print(f"Processed {count} embeddings...")
-
-                except Exception as e:
-                    print(f"Embedding failed at page {page.get('url', '')} text #{text_idx}: {e}")
-                    continue
-
-        f.write("\n]")  # close JSON array
-
-    print(f"Saved embeddings file at {embedding_file_path} ({count} embeddings)")
-    return jsonify({"status": "completed", "count": count, "preview": preview})
-
-
-
+    return jsonify({"status": "started", "job_id": job_id})
 
 
 if __name__ == "__main__":
